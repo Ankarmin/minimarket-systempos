@@ -1,5 +1,6 @@
 {
   "name": "minimarket-systempos",
+  "version": "3.0.0",
   "private": true,
   "scripts": {
     "build": "turbo run build",

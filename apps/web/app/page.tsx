@@ -158,7 +158,7 @@ function Sidebar({ view, setView }: { view: ViewKey; setView: (v: ViewKey) => vo
         })}
       </nav>
       <div className="mx-4 border-t border-white/10" />
-      <div className="px-5 py-4 text-[11px] text-sidebar-fg/70">v2.0.0</div>
+      <div className="px-5 py-4 text-[11px] text-sidebar-fg/70">v3.0.0</div>
     </aside>
   );
 }
