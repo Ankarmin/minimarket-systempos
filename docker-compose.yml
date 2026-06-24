@@ -1,0 +1,17 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: minimarket-db
+    restart: unless-stopped
+    ports:
+      - '5434:5432'
+    environment:
+      POSTGRES_USER: minimarket
+      POSTGRES_PASSWORD: minimarket_dev
+      POSTGRES_DB: minimarket_db
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./apps/api/init/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+
+volumes:
+  pgdata:
