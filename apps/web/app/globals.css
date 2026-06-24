@@ -1,0 +1,63 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@theme {
+  --color-bg: rgb(241 245 249);
+  --color-surface: rgb(255 255 255);
+  --color-sidebar: rgb(15 23 42);
+  --color-sidebar-fg: rgb(203 213 225);
+  --color-sidebar-hover: rgb(51 65 85);
+  --color-accent: rgb(59 130 246);
+  --color-success: rgb(34 197 94);
+  --color-danger: rgb(239 68 68);
+  --color-warning: rgb(245 158 11);
+  --color-purple: rgb(124 58 237);
+  --color-orange: rgb(234 88 12);
+  --color-text: rgb(15 23 42);
+  --color-muted: rgb(100 116 139);
+  --color-border: rgb(226 232 240);
+  --color-row-alt: rgb(248 250 252);
+  --color-row-sel: rgb(219 234 254);
+  --color-background: rgb(255 255 255);
+  --color-foreground: rgb(15 23 42);
+  --color-primary: rgb(59 130 246);
+  --color-primary-foreground: #ffffff;
+  --color-secondary: rgb(100 116 139);
+  --color-secondary-foreground: #ffffff;
+  --color-destructive: rgb(239 68 68);
+  --color-destructive-foreground: #ffffff;
+  --color-muted-foreground: rgb(100 116 139);
+  --color-accent-foreground: #ffffff;
+  --color-popover: rgb(255 255 255);
+  --color-popover-foreground: rgb(15 23 42);
+  --color-card: rgb(255 255 255);
+  --color-card-foreground: rgb(15 23 42);
+  --color-input: rgb(226 232 240);
+  --color-ring: rgb(59 130 246);
+  --color-sidebar-accent: rgb(51 65 85);
+  --color-sidebar-accent-foreground: rgb(203 213 225);
+  --color-sidebar-border: rgba(255, 255, 255, 0.1);
+  --color-sidebar-ring: rgb(59 130 246);
+  --color-sidebar-foreground: rgb(203 213 225);
+  --color-sidebar-primary: rgb(15 23 42);
+  --color-sidebar-primary-foreground: rgb(203 213 225);
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+
+* {
+  border-color: var(--color-border);
+}
