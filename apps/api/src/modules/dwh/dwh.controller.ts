@@ -14,6 +14,11 @@ export class DwhController {
     return this.etlService.ejecutar();
   }
 
+  @Post('etl-db')
+  ejecutarEtlEnDbms() {
+    return this.etlService.ejecutarEnDbms();
+  }
+
   @Get('ventas-por-mes')
   ventasPorMes() {
     return this.dwhService.ventasPorMes();

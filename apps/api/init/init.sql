@@ -452,3 +452,99 @@ CREATE TABLE IF NOT EXISTS dwh.fact_ventas (
     total_venta DECIMAL(12,2) NOT NULL DEFAULT 0,
     igv         DECIMAL(12,2) NOT NULL DEFAULT 0
 );
+
+-- ============================================================
+-- LÓGICA EN EL LENGUAJE DEL DBMS (PL/pgSQL)
+-- Reglas de negocio y ETL implementadas del lado del servidor
+-- de base de datos, equivalente a PL/SQL (Oracle) o T-SQL (SQL Server).
+-- ============================================================
+
+-- IGV 18% calculado dentro del DBMS. IMMUTABLE => optimizable e indexable.
+CREATE OR REPLACE FUNCTION fn_calcular_igv(p_subtotal NUMERIC)
+RETURNS NUMERIC
+LANGUAGE plpgsql
+IMMUTABLE
+AS $$
+BEGIN
+    RETURN ROUND(p_subtotal * 0.18, 2);
+END;
+$$;
+
+-- Total (subtotal + IGV) calculado dentro del DBMS.
+CREATE OR REPLACE FUNCTION fn_calcular_total(p_subtotal NUMERIC)
+RETURNS NUMERIC
+LANGUAGE plpgsql
+IMMUTABLE
+AS $$
+BEGIN
+    RETURN ROUND(p_subtotal + fn_calcular_igv(p_subtotal), 2);
+END;
+$$;
+
+-- ------------------------------------------------------------
+-- Procedimiento almacenado: PIPELINE ETL COMPLETO EN EL DBMS
+-- Reemplaza/replica el EtlService (TypeScript) ejecutando las 6
+-- etapas del ETL directamente en PostgreSQL. Se invoca con:
+--     CALL dwh.sp_refrescar_dwh();
+-- ------------------------------------------------------------
+CREATE OR REPLACE PROCEDURE dwh.sp_refrescar_dwh()
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_hechos INTEGER;
+BEGIN
+    -- 1. Limpiar tablas del DWH (respetando dependencias lógicas)
+    DELETE FROM dwh.fact_ventas;
+    DELETE FROM dwh.dim_tiempo;
+    DELETE FROM dwh.dim_producto;
+    DELETE FROM dwh.dim_cliente;
+    DELETE FROM dwh.dim_sucursal;
+
+    -- 2. dim_producto
+    INSERT INTO dwh.dim_producto (id_producto, nombre, categoria, precio_unitario)
+    SELECT id, nombre, categoria, precio FROM productos WHERE estado = TRUE;
+
+    -- 3. dim_cliente (clasificación Anonimo / Registrado)
+    INSERT INTO dwh.dim_cliente (id_cliente, nombre, tipo)
+    SELECT id, nombre,
+           CASE WHEN dni = '00000000' THEN 'Anonimo' ELSE 'Registrado' END
+    FROM clientes WHERE estado = TRUE;
+
+    -- 4. dim_sucursal
+    INSERT INTO dwh.dim_sucursal (id_sucursal, nombre, region)
+    SELECT id_sucursal, nombre, nombre FROM sucursales WHERE activo = TRUE;
+
+    -- 5. dim_tiempo (derivada de las fechas de ventas activas, clave YYYYMM).
+    -- Nombre de mes en español mediante arreglo (independiente del locale del motor).
+    INSERT INTO dwh.dim_tiempo (id_tiempo, anio, mes, trimestre, nombre_mes)
+    SELECT DISTINCT
+        EXTRACT(YEAR FROM fecha)::int * 100 + EXTRACT(MONTH FROM fecha)::int,
+        EXTRACT(YEAR FROM fecha)::int,
+        EXTRACT(MONTH FROM fecha)::int,
+        CEIL(EXTRACT(MONTH FROM fecha) / 3.0)::int,
+        (ARRAY['Enero','Febrero','Marzo','Abril','Mayo','Junio',
+               'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
+        )[EXTRACT(MONTH FROM fecha)::int]
+    FROM ventas WHERE estado = TRUE;
+
+    -- 6. fact_ventas (agregación de detalle_ventas + ventas, IGV vía función)
+    INSERT INTO dwh.fact_ventas (id_producto, id_cliente, id_tiempo, id_sucursal, cantidad, total_venta, igv)
+    SELECT
+        dv.producto_id,
+        COALESCE(v.cliente_id, 1),
+        EXTRACT(YEAR FROM v.fecha)::int * 100 + EXTRACT(MONTH FROM v.fecha)::int,
+        v.id_sucursal,
+        SUM(dv.cantidad),
+        SUM(dv.subtotal),
+        fn_calcular_igv(SUM(dv.subtotal))
+    FROM detalle_ventas dv
+    JOIN ventas v ON v.id = dv.venta_id
+    WHERE dv.estado = TRUE AND v.estado = TRUE
+    GROUP BY dv.producto_id, v.cliente_id,
+             EXTRACT(YEAR FROM v.fecha)::int * 100 + EXTRACT(MONTH FROM v.fecha)::int,
+             v.id_sucursal;
+
+    SELECT COUNT(*) INTO v_hechos FROM dwh.fact_ventas;
+    RAISE NOTICE 'ETL DBMS completado: % hechos cargados en dwh.fact_ventas', v_hechos;
+END;
+$$;

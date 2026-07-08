@@ -100,4 +100,21 @@ export class EtlService {
       etapas,
     };
   }
+
+  /**
+   * Ejecuta el ETL delegando toda la lógica al DBMS mediante el
+   * procedimiento almacenado PL/pgSQL `dwh.sp_refrescar_dwh()`.
+   * Demuestra el desarrollo "en el lenguaje asociado al DBMS".
+   */
+  async ejecutarEnDbms(): Promise<{ mensaje: string; motor: string; hechos: number }> {
+    await this.dataSource.query('CALL dwh.sp_refrescar_dwh()');
+    const count = await this.dataSource.query(
+      'SELECT COUNT(*)::int AS cnt FROM dwh.fact_ventas',
+    );
+    return {
+      mensaje: 'ETL ejecutado dentro del DBMS (PL/pgSQL: CALL dwh.sp_refrescar_dwh)',
+      motor: 'PL/pgSQL — procedimiento almacenado',
+      hechos: count[0].cnt,
+    };
+  }
 }
