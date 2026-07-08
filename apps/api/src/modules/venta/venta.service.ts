@@ -5,6 +5,7 @@ import { Venta } from './entities/venta.entity';
 import { DetalleVenta } from './entities/detalle-venta.entity';
 import { Producto } from '../producto/entities/producto.entity';
 import { Sucursal } from '../sucursal/entities/sucursal.entity';
+import { Cliente } from '../cliente/entities/cliente.entity';
 import { CreateVentaDto } from './dto/create-venta.dto';
 
 @Injectable()
@@ -51,7 +52,10 @@ export class VentaService {
       }
 
       if (dto.clienteId) {
-        const cliente = await manager.findOneBy(Sucursal, { id: dto.clienteId });
+        const cliente = await manager.findOneBy(Cliente, {
+          id: dto.clienteId,
+          estado: true,
+        });
         if (!cliente) {
           throw new BadRequestException('Cliente no encontrado');
         }
