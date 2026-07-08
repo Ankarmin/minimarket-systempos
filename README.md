@@ -50,33 +50,90 @@ pnpm build            # build de producción de ambos
 pnpm db:down          # detiene PostgreSQL
 ```
 
-## Arquitectura N-Capas
+## Arquitectura MVC con N Capas
 
-El monorepo implementa una arquitectura por capas desacoplada:
+El monorepo implementa el patrón **MVC** (Modelo = Datos, Vista = Front-End,
+Controlador = Back-End) sobre **5 capas** desacopladas y distribuibles:
+**Aplicación, Datos, FTP, Mirror y DataWareHouse**, más una arquitectura de
+**Microkernel + Plugins** en el back-end.
 
 ```
-┌─────────────────────────┐
-│  apps/web  (Next.js)    │  ← Capa Presentación
-│  :3000                  │
-│  - POS UI               │
-│  - Dashboard            │
-│  - Cubos OLAP visuales  │
-└───────────┬─────────────┘
-            │ REST JSON (fetch)
-┌───────────▼─────────────┐
-│  apps/api  (NestJS)     │  ← Capa Aplicación / Negocio
-│  :3001                  │
-│  Controllers (HTTP)     │
-│  Services (reglas)      │
-│  TypeORM (repositorios) │
-└───────────┬─────────────┘
-            │ SQL
-┌───────────▼─────────────┐
-│  PostgreSQL :5434       │  ← Capa Datos
-│  public.*  (OLTP)       │
-│  dwh.*     (OLAP)       │
-└─────────────────────────┘
+                         ┌─────────────────────────┐
+   VISTA (Front-End) ───►│  apps/web  (Next.js)    │  ← Capa Presentación
+                         │  :3000                  │
+                         │  - POS UI / Dashboard   │
+                         │  - Cubos OLAP visuales  │
+                         └───────────┬─────────────┘
+                                     │ REST JSON (fetch)
+ CONTROLADOR (Back-End) ─►┌──────────▼──────────────┐
+                          │  apps/api  (NestJS)     │  ← Capa Aplicación
+                          │  :3001                  │
+                          │  Controllers + Services │
+                          │  ┌───────────────────┐  │
+                          │  │ MICROKERNEL       │  │  núcleo + plugins
+                          │  │ PluginRegistry    │  │  (export CSV/JSON)
+                          │  └───────────────────┘  │
+                          └───┬───────────┬─────┬────┘
+                    SQL       │           │ FTP │
+      MODELO (Datos) ─────────┤           │     └──────────────┐
+              ┌───────────────▼──────┐    │        ┌───────────▼──────────┐
+              │ PostgreSQL PRIMARIO  │    │        │  Servidor FTP  :21   │  ← Capa FTP
+              │ :5434                │    │        │  /reportes (backups) │
+              │ public.* (OLTP)      │    │        └──────────────────────┘
+              │ dwh.*    (OLAP+PLpg) │◄── DataWareHouse (schema dwh + PL/pgSQL)
+              └───────────┬──────────┘    │
+                          │ streaming WAL │
+              ┌───────────▼──────────┐    │
+              │ PostgreSQL RÉPLICA   │◄───┘  ← Capa Mirror (hot standby, R/O)
+              │ :5435 (espejo)       │
+              └──────────────────────┘
 ```
+
+| Capa | Servicio | Puerto |
+|---|---|---|
+| **Aplicación** | NestJS (`apps/api`) | 3001 |
+| **Datos** | PostgreSQL primario (`postgres-primary`) | 5434 |
+| **Mirror** | PostgreSQL réplica hot-standby (`postgres-replica`) | 5435 |
+| **FTP** | Servidor FTP de reportes (`ftp`) | 21 |
+| **DataWareHouse** | schema `dwh.*` + procedimientos PL/pgSQL | (en primario) |
+
+### Microkernel + Plugins
+
+El back-end incorpora un **microkernel** (`src/microkernel/`): el
+`PluginRegistry` es un núcleo mínimo que **descubre y registra plugins** en el
+arranque sin conocer sus implementaciones. Cada capacidad de exportación es un
+plugin intercambiable que implementa el contrato `ExportPlugin`:
+
+- `CsvExportPlugin` → CSV (RFC 4180)
+- `JsonExportPlugin` → JSON indentado
+
+Agregar un formato nuevo = crear una clase `SystemPlugin` + registrarla en
+`MicrokernelModule`; **el núcleo no se modifica**. `GET /api/plugins` lista los
+plugins cargados en runtime.
+
+### Lógica en el lenguaje del DBMS (PL/pgSQL)
+
+Parte de la lógica reside en el motor de datos (equivalente a PL/SQL / T-SQL):
+
+- `fn_calcular_igv(numeric)` / `fn_calcular_total(numeric)` — IGV 18% en el DBMS.
+- `dwh.sp_refrescar_dwh()` — **procedimiento almacenado** que ejecuta el pipeline
+  ETL completo (6 etapas) dentro de PostgreSQL. Se dispara con
+  `POST /api/analytics/etl-db` (`CALL dwh.sp_refrescar_dwh()`).
+
+### Capa Mirror (réplica en streaming)
+
+`postgres-replica` clona el primario con `pg_basebackup` y replica vía WAL
+streaming (rol `replicator`, `standby.signal`), quedando como **hot standby de
+sólo lectura** en el puerto 5435. Scripts: `apps/db/00-replication.sh` (primario)
+y `apps/db/replica-entrypoint.sh` (réplica).
+
+### Capa FTP (transferencia de archivos)
+
+`FtpService` toma un reporte del DWH, lo serializa con un **plugin del
+microkernel** y lo sube al servidor FTP remoto:
+
+- `POST /api/ftp/backup` — body `{ "reporte": "ventas-por-producto", "plugin": "export-csv" }`
+- `GET /api/ftp/list` — lista los reportes almacenados en `reportes/` (home del usuario FTP)
 
 **12 endpoints REST:** `sucursales`, `productos`, `clientes`, `ventas` (registro + anulación), `dashboard/kpis`, `analytics/etl`, `ventas-por-mes`, `ventas-por-producto`, `ventas-por-sucursal`, `top-clientes`, `cubo-2d`, `cubo-3d`, `cross-tab`.
 
@@ -229,7 +286,8 @@ OLAP (Star Schema):
 ### Analítica — Data Warehouse
 | Método | Ruta | Descripción |
 |---|---|---|
-| `POST` | `/api/analytics/etl` | Ejecutar pipeline ETL (6 etapas) |
+| `POST` | `/api/analytics/etl` | Ejecutar pipeline ETL (6 etapas, en TypeScript) |
+| `POST` | `/api/analytics/etl-db` | Ejecutar ETL dentro del DBMS (`CALL dwh.sp_refrescar_dwh()`) |
 | `GET` | `/api/analytics/ventas-por-mes` | Agregado por mes |
 | `GET` | `/api/analytics/ventas-por-producto` | Top productos por venta |
 | `GET` | `/api/analytics/ventas-por-sucursal` | Ventas por sucursal |
@@ -237,6 +295,43 @@ OLAP (Star Schema):
 | `GET` | `/api/analytics/cubo-2d` | Cubo 2D (Producto × Mes) |
 | `GET` | `/api/analytics/cubo-3d` | Cubo 3D (Producto × Mes × Sucursal) |
 | `GET` | `/api/analytics/cross-tab` | Tabla cruzada producto × sucursal |
+
+### Microkernel y FTP
+| Método | Ruta | Descripción |
+|---|---|---|
+| `GET` | `/api/plugins` | Lista los plugins cargados en el microkernel |
+| `POST` | `/api/ftp/backup` | Exporta un reporte del DWH (plugin CSV/JSON) y lo sube por FTP |
+| `GET` | `/api/ftp/list` | Lista los reportes almacenados en el servidor FTP |
+
+## Web Service SOAP (SoapUI)
+
+Además de la API REST/JSON, el back-end expone un **web service SOAP** clásico
+(WSDL), montado sobre el mismo Express en `src/modules/soap/`:
+
+- **Endpoint SOAP:** `POST http://localhost:3001/soap/minimarket`
+- **Contrato WSDL:** `GET  http://localhost:3001/soap/minimarket?wsdl`
+- **Namespace (tns):** `http://minimarket.unmsm.edu.pe/pos`
+
+Operaciones (document/literal, SOAP 1.1):
+
+| Operación | Entrada | Salida |
+|---|---|---|
+| `ListarProductos` | `categoria?` | lista de `Producto` |
+| `ObtenerProducto` | `id` | `encontrado` + `Producto` |
+| `CalcularIgv` | `subtotal` | `subtotal`, `igv` (18%), `total` |
+| `ConsultarStock` | `productoId` | `stock`, `disponible` |
+
+### Probarlo en SoapUI
+
+1. Descarga SoapUI Open Source (gratis) de **soapui.org** e instálalo.
+2. Levanta la API: `pnpm dev` (o `node dist/main` desde `apps/api`).
+3. En SoapUI: **File → New SOAP Project**.
+4. En *Initial WSDL* pega: `http://localhost:3001/soap/minimarket?wsdl` → **OK**.
+5. SoapUI genera las 4 operaciones. Abre una *Request 1*, completa los
+   parámetros (ej. `CalcularIgv` con `<subtotal>100</subtotal>`) y pulsa **▶**.
+
+> El WSDL usa `soap:address location="http://localhost:3001/..."`. Si ejecutas
+> la API en otro host/puerto, ajusta el endpoint en SoapUI (pestaña del request).
 
 ### Cubo 2D — Respuesta de ejemplo
 
