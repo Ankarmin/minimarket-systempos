@@ -121,6 +121,28 @@ export const api = {
   // Analytics / DWH
   getEtl: () => request<{ mensaje: string; etapas: string[] }>('/analytics/etl', { method: 'POST' }),
 
+  // ETL ejecutado dentro del DBMS (procedimiento almacenado PL/pgSQL)
+  getEtlDb: () =>
+    request<{ mensaje: string; motor: string; hechos: number }>('/analytics/etl-db', { method: 'POST' }),
+
+  // Microkernel — plugins cargados
+  getPlugins: () =>
+    request<{
+      arquitectura: string;
+      total: number;
+      plugins: { id: string; name: string; version: string; kind: string; description: string }[];
+    }>('/plugins'),
+
+  // Capa FTP — exportar reporte del DWH y subirlo por FTP
+  ftpBackup: (reporte: string, plugin: 'export-csv' | 'export-json' = 'export-csv') =>
+    request<{ archivo: string; bytes: number; formato: string; ruta: string }>('/ftp/backup', {
+      method: 'POST',
+      body: JSON.stringify({ reporte, plugin }),
+    }),
+
+  ftpList: () =>
+    request<{ nombre: string; tamano: number; fecha: string }[]>('/ftp/list'),
+
   getCubo2D: () =>
     request<{ productos: string[]; meses: string[]; mesesIdx: number[]; matrix: number[][]; formula: string; descripcion: string; totalVentas: string }>('/analytics/cubo-2d'),
 
