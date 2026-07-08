@@ -1,5 +1,8 @@
 services:
-  postgres:
+  # ============================================================
+  # CAPA DE DATOS — PostgreSQL PRIMARIO (OLTP + DWH)
+  # ============================================================
+  postgres-primary:
     image: postgres:17-alpine
     container_name: minimarket-db
     restart: unless-stopped
@@ -9,9 +12,63 @@ services:
       POSTGRES_USER: minimarket
       POSTGRES_PASSWORD: minimarket_dev
       POSTGRES_DB: minimarket_db
+    # Parámetros WAL requeridos para replicación en streaming (Mirror).
+    command: >
+      postgres
+      -c wal_level=replica
+      -c max_wal_senders=10
+      -c max_replication_slots=10
+      -c hot_standby=on
+      -c listen_addresses='*'
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - pgdata_primary:/var/lib/postgresql/data
+      # 00-* corre antes que 01-*: primero el rol de replicación, luego el seed.
+      - ./apps/db/00-replication.sh:/docker-entrypoint-initdb.d/00-replication.sh:ro
       - ./apps/api/init/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U minimarket -d minimarket_db']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ============================================================
+  # CAPA MIRROR — PostgreSQL RÉPLICA (hot standby, sólo lectura)
+  # Copia en streaming del primario mediante pg_basebackup + WAL.
+  # ============================================================
+  postgres-replica:
+    image: postgres:17-alpine
+    container_name: minimarket-db-mirror
+    restart: unless-stopped
+    user: postgres
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+    ports:
+      - '5435:5432'
+    environment:
+      PGPASSWORD: replicator_pwd
+    entrypoint: ['bash', '/replica-entrypoint.sh']
+    volumes:
+      - pgdata_replica:/var/lib/postgresql/data
+      - ./apps/db/replica-entrypoint.sh:/replica-entrypoint.sh:ro
+
+  # ============================================================
+  # CAPA FTP — Servidor de transferencia de archivos (reportes/backups)
+  # ============================================================
+  ftp:
+    image: delfer/alpine-ftp-server:latest
+    container_name: minimarket-ftp
+    restart: unless-stopped
+    ports:
+      - '21:21'
+      - '21000-21010:21000-21010'
+    environment:
+      USERS: 'minimarket|minimarket_ftp|/home/minimarket'
+      ADDRESS: localhost
+    volumes:
+      - ftpdata:/home/minimarket
 
 volumes:
-  pgdata:
+  pgdata_primary:
+  pgdata_replica:
+  ftpdata:
