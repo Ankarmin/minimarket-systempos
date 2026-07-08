@@ -7,6 +7,9 @@ import { ProductoModule } from './modules/producto/producto.module';
 import { ClienteModule } from './modules/cliente/cliente.module';
 import { VentaModule } from './modules/venta/venta.module';
 import { DwhModule } from './modules/dwh/dwh.module';
+import { FtpModule } from './modules/ftp/ftp.module';
+import { SoapModule } from './modules/soap/soap.module';
+import { MicrokernelModule } from './microkernel/microkernel.module';
 import { DashboardController } from './modules/venta/dashboard.controller';
 
 @Module({
@@ -18,6 +21,9 @@ import { DashboardController } from './modules/venta/dashboard.controller';
     ClienteModule,
     VentaModule,
     DwhModule,
+    MicrokernelModule,
+    FtpModule,
+    SoapModule,
   ],
   controllers: [DashboardController],
 })
