@@ -2,33 +2,34 @@
 
 La aplicación evolucionó desde una arquitectura Cliente/Servidor Java + TCP + SQLite hacia un monorepo moderno con TypeScript, NestJS, Next.js, PostgreSQL y contenedores Docker. Se conservan todas las reglas de negocio originales (IGV 18%, transacciones, control de stock, anulación con reversión) y se extiende la parte analítica con un Data Warehouse en esquema estrella y cubos OLAP expuestos como endpoints REST JSON.
 
-**Stack del Tercer Entregable:** TypeScript 5, NestJS 11, Next.js 16, TypeORM, PostgreSQL 17 (Docker), Tailwind CSS v4, shadcn/ui, pnpm + Turbo.
+**Stack del Tercer Entregable:** TypeScript 5, NestJS 11, Next.js 16, TypeORM, PostgreSQL 17 (Docker), Tailwind CSS v4, shadcn/ui, pnpm + Turbo. Incluye microkernel de plugins, réplica de BD (mirror), capa FTP, ETL en PL/pgSQL y un web service SOAP (probable con SoapUI).
 
 ## Estructura del Monorepo
 
 ```
 minimarket-systempos/
-├── docker-compose.yml          ← PostgreSQL :5434
+├── docker-compose.yml          ← PostgreSQL primario :5434 + réplica :5435 + FTP :21
 ├── pnpm-workspace.yaml         ← apps/*
 ├── turbo.json                  ← build/dev orchestrator
+├── docs/                       ← Guía de instalación asistida por IA
 ├── apps/
-│   ├── api/                    ← NestJS backend REST
-│   │   ├── .env                ← DB_HOST, DB_PORT, DB_USER...
-│   │   ├── init/init.sql       ← Seed data OLTP + DWH
+│   ├── api/                    ← NestJS backend (REST + SOAP)
+│   │   ├── .env                ← DB_HOST, DB_PORT, DB_USER, FTP_*...
+│   │   ├── init/init.sql       ← Seed data OLTP + DWH + funciones PL/pgSQL
 │   │   └── src/
-│   │       ├── main.ts         ← Entry point :3001, CORS, ValidationPipe
-│   │       ├── app.module.ts   ← Root module (TypeORM + 5 módulos)
+│   │       ├── main.ts         ← Entry point :3001, CORS, SOAP, ValidationPipe
+│   │       ├── app.module.ts   ← Root module (TypeORM + módulos)
 │   │       ├── config/database.config.ts
+│   │       ├── microkernel/    ← Núcleo de plugins (PluginRegistry + exportadores)
 │   │       └── modules/
 │   │           ├── sucursal/   ← CRUD REST
 │   │           ├── producto/   ← CRUD REST + búsqueda
 │   │           ├── cliente/    ← CRUD REST + búsqueda
 │   │           ├── venta/      ← Registro POS + Anulación + KPIs
-│   │           └── dwh/        ← ETL + OLAP Cubes
-│   │               ├── entities/  (5 entidades DWH)
-│   │               ├── etl.service.ts
-│   │               ├── dwh.service.ts
-│   │               └── dwh.controller.ts
+│   │           ├── dwh/        ← ETL + OLAP Cubes + PL/pgSQL
+│   │           ├── ftp/        ← Exportar reportes del DWH por FTP
+│   │           └── soap/       ← Web service SOAP (WSDL para SoapUI)
+│   ├── db/                     ← Scripts de replicación (capa mirror)
 │   └── web/                    ← Next.js frontend
 │       ├── app/
 │       │   ├── page.tsx        ← POS + Dashboard + Analytics
@@ -42,12 +43,16 @@ minimarket-systempos/
 
 ## ¿Cómo ejecutar?
 
+> 🆕 **¿No tienes Docker ni SoapUI instalados?** Usa la guía asistida por IA de
+> [`docs/prompt-instalacion-con-ia.md`](docs/prompt-instalacion-con-ia.md): copia el
+> prompt a un asistente (como Claude Code) y te instala y configura todo paso a paso.
+
 ```bash
 pnpm install          # instala dependencias del monorepo (una sola vez)
-pnpm db:up            # levanta PostgreSQL :5434 con seed data
-pnpm dev              # API :3001 + Frontend :3000 simultáneamente
+pnpm db:up            # levanta Docker: PostgreSQL primario :5434 + réplica :5435 + FTP :21
+pnpm dev              # API :3001 (REST + SOAP) + Frontend :3000 simultáneamente
 pnpm build            # build de producción de ambos
-pnpm db:down          # detiene PostgreSQL
+pnpm db:down          # detiene y elimina los contenedores (los datos persisten en volúmenes)
 ```
 
 ## Arquitectura MVC con N Capas
@@ -415,7 +420,10 @@ O directamente desde el frontend: sidebar → **Analítica** → cubos visualiza
 
 - Node.js >= 18
 - pnpm >= 9 (`corepack enable && corepack prepare pnpm@9 --activate`)
-- Docker Desktop (para PostgreSQL)
+- Docker Desktop (para PostgreSQL primario, réplica y servidor FTP)
+- SoapUI Open Source (opcional, solo para probar el web service SOAP)
 - Puerto 3000 libre (frontend)
-- Puerto 3001 libre (API)
-- Puerto 5434 libre (PostgreSQL)
+- Puerto 3001 libre (API REST + SOAP)
+- Puerto 5434 libre (PostgreSQL primario)
+- Puerto 5435 libre (PostgreSQL réplica / mirror)
+- Puerto 21 libre (servidor FTP)
